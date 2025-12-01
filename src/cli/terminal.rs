@@ -17,6 +17,21 @@ pub fn error(message: &str) {
     }
 }
 
+pub fn warning(message: &str) {
+    if let Some(mut t) = term::stdout() {
+        match t.fg(term::color::YELLOW) {
+            Ok(_) => {
+                write!(t, "{}", message).unwrap();
+                t.reset().unwrap();
+                t.flush().unwrap();
+            }
+            Err(_) => writeln!(t, "{}", message).unwrap(),
+        };
+    } else {
+        eprint!("{}", message);
+    }
+}
+
 /// Show a success message
 pub fn success(message: &str) {
     if let Some(mut t) = term::stdout() {

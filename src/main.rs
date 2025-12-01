@@ -58,31 +58,83 @@ fn load_values_from_json_file(template: &Template, input_json_file: &PathBuf) ->
     }
 
     let file_content = std::fs::read_to_string(&input_json_file)?;
-    let json_values: HashMap<String, serde_json::Value> = serde_json::from_str(&file_content)?;
 
-    let mut vals = HashMap::new();
+    // Should raise error if:
+    // - the JSON is invalid
+    // - the JSON does not represent an mapping of variable names to values, for example, it's an array or value contains nested objects
+    // - any variable has an invalid type
+    // - any required variable names are not defined in the template
 
-    for (key, json_value) in json_values {
-        let var_def = template
+    // Parse as a JSON value first so we can validate that it's an object
+    let root_value: serde_json::Value = serde_json::from_str(&file_content)
+        .map_err(|e| anyhow::anyhow!("Invalid JSON in input file: {}", e))?;
+
+    let json_map = match root_value {
+        serde_json::Value::Object(map) => map,
+        _ => {
+            bail!("Input JSON must be an object mapping variable names to simple value (strings, booleans, number)");
+        }
+    };
+
+    // Check for unknown variables in input JSON
+    for key in json_map.keys() {
+        let known = template
             .definition
             .variables
             .iter()
-            .find(|v| v.name == key)
-            .ok_or_else(|| anyhow::anyhow!("Variable `{}` not defined in template", key))?;
+            .any(|v| &v.name == key);
+        if !known {
+            terminal::warning(&format!("Variable `{}` not defined in template", key));
+        }
+    }
 
-        let value = match (&var_def.validation, json_value) {
-            (_, serde_json::Value::String(s)) => Value::String(s),
-            (_, serde_json::Value::Bool(b)) => Value::Boolean(b),
-            (_, serde_json::Value::Number(n)) if n.is_i64() => Value::Integer(n.as_i64().unwrap() as i64),
-            _ => {
-                return Err(anyhow::anyhow!(
-                    "Invalid type for variable `{}` in input file",
-                    key
-                ))
+    let mut vals = HashMap::new();
+
+    // Iterate variables in template order (so only_if/defaults evaluation matches interactive flow)
+    for var in &template.definition.variables {
+        // only_if check: if a variable provided in JSON is not applicable, just ignore it
+        if !template.should_ask_variable(&var.name, &vals)? {
+            if json_map.contains_key(&var.name) {
+                terminal::warning(&format!("Variable `{}` provided in input but its `only_if` condition is not satisfied", var.name));
+                continue;
             }
-        };
+        }
 
-        vals.insert(key, value);
+        // If JSON contains a value for this variable, validate and use it
+        if let Some(json_value) = json_map.get(&var.name) {
+            let value = match json_value {
+                serde_json::Value::String(s) => Value::String(s.clone()),
+                serde_json::Value::Bool(b) => Value::Boolean(*b),
+                serde_json::Value::Number(n) if n.is_i64() => {
+                    Value::Integer(n.as_i64().unwrap() as i64)
+                }
+                serde_json::Value::Number(_) => {
+                    return Err(anyhow::anyhow!(
+                        "Invalid type for variable `{}` in input file: only integer numbers are supported",
+                        var.name
+                    ))
+                }
+                serde_json::Value::Null => {
+                    return Err(anyhow::anyhow!(
+                        "Invalid type for variable `{}` in input file: null is not supported",
+                        var.name
+                    ))
+                }
+                serde_json::Value::Array(_) | serde_json::Value::Object(_) => {
+                    return Err(anyhow::anyhow!(
+                        "Invalid type for variable `{}` in input file: nested arrays/objects are not supported",
+                        var.name
+                    ))
+                }
+            };
+
+            vals.insert(var.name.clone(), value);
+        } else {
+            // JSON did not provide a value for this variable. If it's required, that's an error
+            if template.should_ask_variable(&var.name, &vals)? && !vals.contains_key(&var.name) {
+                bail!("Required variable `{}` missing from input file", var.name);
+            }
+        }
     }
 
     Ok(vals)
