@@ -26,7 +26,11 @@ pub struct Cli {
     #[clap(short = 'd', long)]
     pub directory: Option<String>,
 
-    /// Do not prompt for variables and only use the defaults from template.toml
+    /// Input file with variable values in JSON format，should NOT be used with --no-input
+    #[clap(short = 'i', long)]
+    pub input_file: Option<PathBuf>,
+
+    /// Do not prompt for variables and only use the defaults from template.toml，should NOT be used with --input
     #[clap(long, default_value_t = false)]
     pub no_input: bool,
 
@@ -45,6 +49,43 @@ pub enum Command {
         /// The path to the template.toml
         path: PathBuf,
     },
+}
+
+fn load_values_from_json_file(template: &Template, input_json_file: &PathBuf) -> Result<HashMap<String, Value>> {
+    // Raise error if input file does not exist
+    if !input_json_file.exists() {
+        bail!("Input file `{}` does not exist", input_json_file.display());
+    }
+
+    let file_content = std::fs::read_to_string(&input_json_file)?;
+    let json_values: HashMap<String, serde_json::Value> = serde_json::from_str(&file_content)?;
+
+    let mut vals = HashMap::new();
+
+    for (key, json_value) in json_values {
+        let var_def = template
+            .definition
+            .variables
+            .iter()
+            .find(|v| v.name == key)
+            .ok_or_else(|| anyhow::anyhow!("Variable `{}` not defined in template", key))?;
+
+        let value = match (&var_def.validation, json_value) {
+            (_, serde_json::Value::String(s)) => Value::String(s),
+            (_, serde_json::Value::Bool(b)) => Value::Boolean(b),
+            (_, serde_json::Value::Number(n)) if n.is_i64() => Value::Integer(n.as_i64().unwrap() as i64),
+            _ => {
+                return Err(anyhow::anyhow!(
+                    "Invalid type for variable `{}` in input file",
+                    key
+                ))
+            }
+        };
+
+        vals.insert(key, value);
+    }
+
+    Ok(vals)
 }
 
 /// Ask all the questions of that template and return the answers.
@@ -125,8 +166,19 @@ fn try_main() -> Result<()> {
             let mut template =
                 Template::from_input(&cli.template.unwrap(), cli.directory.as_deref())?;
 
-            // 1. ask questions
-            let vals = ask_questions(&template, cli.no_input)?;
+            // Load input file if provided
+            let vals: HashMap<String, Value>;
+            if let Some(input_file) = cli.input_file {
+                if cli.no_input {
+                    bail!("--input-file and --no-input cannot be used together");
+                }
+                vals = load_values_from_json_file(&template, &input_file)?;
+            }
+            else {
+                // 1. ask questions
+                vals = ask_questions(&template, cli.no_input)?;
+            }
+
             template.set_variables(vals)?;
 
             // 2. run pre-gen hooks
