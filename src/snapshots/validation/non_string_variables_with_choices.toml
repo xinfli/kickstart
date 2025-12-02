@@ -1,0 +1,15 @@
+name = "Test template"
+description = "A description"
+kickstart_version = 1
+
+[[variables]]
+name = "create_demo_data"
+default = true
+prompt = "Create demo data?"
+choices = [true, false]
+
+[[variables]]
+name = "demo_record_count"
+default = 100
+prompt = "How many demo data to be created?"
+choices = [100, 150, 200]

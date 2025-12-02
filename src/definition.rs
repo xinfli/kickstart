@@ -136,16 +136,24 @@ impl TemplateDefinition {
             types.insert(var.name.to_string(), type_str);
 
             if let Some(ref choices) = var.choices {
-                let mut choice_found = false;
-                for c in choices {
-                    if *c == var.default {
-                        choice_found = true;
+                if var.default.is_str() {
+                    let mut choice_found = false;
+                    for c in choices {
+                        if *c == var.default {
+                            choice_found = true;
+                        }
+                    }
+                    if !choice_found {
+                        errs.push(format!(
+                            "Variable `{}` has `{}` as default, which isn't in the choices",
+                            var.name, var.default
+                        ));
                     }
                 }
-                if !choice_found {
+                else {
                     errs.push(format!(
-                        "Variable `{}` has `{}` as default, which isn't in the choices",
-                        var.name, var.default
+                        "Variable `{}` is not string but has choices defined",
+                        var.name
                     ));
                 }
             }

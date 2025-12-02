@@ -59,10 +59,12 @@ fn ask_questions(template: &Template, no_input: bool) -> Result<HashMap<String, 
         }
         let default = template.get_default_for(&var.name, &vals)?;
 
-        if let Some(ref choices) = var.choices {
-            let res = if no_input { default } else { ask_choices(&var.prompt, &default, choices)? };
-            vals.insert(var.name.clone(), res);
-            continue;
+        if matches!(default, Value::String(..)) {
+            if let Some(ref choices) = var.choices {
+                let res = if no_input { default } else { ask_choices(&var.prompt, &default, choices)? };
+                vals.insert(var.name.clone(), res);
+                continue;
+            }
         }
 
         match default {

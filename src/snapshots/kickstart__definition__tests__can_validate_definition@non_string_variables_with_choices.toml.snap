@@ -1,0 +1,9 @@
+---
+source: src/definition.rs
+expression: "&errs"
+input_file: src/snapshots/validation/non_string_variables_with_choices.toml
+---
+[
+    "Variable `create_demo_data` is not string but has choices defined",
+    "Variable `demo_record_count` is not string but has choices defined",
+]
